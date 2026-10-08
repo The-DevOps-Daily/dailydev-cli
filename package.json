@@ -1,6 +1,6 @@
 {
   "name": "@devopsdaily/dailydev-cli",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Read daily.dev from your terminal: your feed, popular posts, search, comments and bookmarks, with --json for scripts and agents. Unofficial.",
   "type": "module",
   "bin": {
@@ -37,7 +37,10 @@
   "bugs": {
     "url": "https://github.com/The-DevOps-Daily/dailydev-cli/issues"
   },
-  "author": "DevOps Daily",
+  "author": {
+    "name": "DevOps Daily",
+    "url": "https://devops-daily.com"
+  },
   "license": "MIT",
   "engines": {
     "node": ">=22"

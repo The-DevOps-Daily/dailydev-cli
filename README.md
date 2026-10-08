@@ -8,7 +8,7 @@ export DAILY_DEV_TOKEN="dda_..."   # from https://daily.dev/settings/api
 dailydev feed
 ```
 
-This is a community project. It is not made by daily.dev. It uses the [daily.dev public API](https://docs.daily.dev/).
+A community project from [DevOps Daily](https://devops-daily.com). It is not made by daily.dev. It uses the [daily.dev public API](https://docs.daily.dev/).
 
 ## What it looks like
 
@@ -93,6 +93,10 @@ node src/bin.ts feed   # run from source on Node 24
 ```
 
 Releases: bump the version in `package.json`, `src/version.ts` and `CHANGELOG.md`, then push a `v*` tag. The release workflow tests, packs and publishes to npm.
+
+## About
+
+Built and maintained by [DevOps Daily](https://devops-daily.com), a blog and set of free tools for DevOps and platform engineers: Kubernetes, Docker, Terraform, CI/CD, Linux and cloud. You can also follow the [DevOps Daily squad](https://daily.dev/squads/devopsdaily) on daily.dev.
 
 ## License
 
