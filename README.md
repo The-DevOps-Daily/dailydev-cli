@@ -3,7 +3,7 @@
 Read [daily.dev](https://daily.dev) from your terminal: your feed, popular posts, search, comments and bookmarks. Every command also has `--json`, so scripts and coding agents can use the same tool.
 
 ```bash
-npm install -g dailydev-cli
+npm install -g @devops-daily/dailydev-cli
 export DAILY_DEV_TOKEN="dda_..."   # from https://daily.dev/settings/api
 dailydev feed
 ```
