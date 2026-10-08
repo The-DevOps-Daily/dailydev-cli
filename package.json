@@ -1,5 +1,5 @@
 {
-  "name": "@devops-daily/dailydev-cli",
+  "name": "@devopsdaily/dailydev-cli",
   "version": "0.1.0",
   "description": "Read daily.dev from your terminal: your feed, popular posts, search, comments and bookmarks, with --json for scripts and agents. Unofficial.",
   "type": "module",

@@ -50,7 +50,7 @@ jobs:
         run: |
           npm pack
           mkdir -p /tmp/dailydev-smoke
-          npm install --prefix /tmp/dailydev-smoke "./devops-daily-dailydev-cli-$VERSION.tgz"
+          npm install --prefix /tmp/dailydev-smoke "./devopsdaily-dailydev-cli-$VERSION.tgz"
           /tmp/dailydev-smoke/node_modules/.bin/dailydev --version | grep -qx "$VERSION"
 
       - name: Update npm for trusted publishing
@@ -60,10 +60,10 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          if npm view "@devops-daily/dailydev-cli@$VERSION" version > /dev/null 2>&1; then
-            echo "@devops-daily/dailydev-cli@$VERSION is already on npm, skipping"
+          if npm view "@devopsdaily/dailydev-cli@$VERSION" version > /dev/null 2>&1; then
+            echo "@devopsdaily/dailydev-cli@$VERSION is already on npm, skipping"
           else
-            npm publish "./devops-daily-dailydev-cli-$VERSION.tgz" --provenance --access public
+            npm publish "./devopsdaily-dailydev-cli-$VERSION.tgz" --provenance --access public
           fi
 
       - name: Create the GitHub release
@@ -76,5 +76,5 @@ jobs:
             found { print }
           ' CHANGELOG.md > release-notes.md
           echo "" >> release-notes.md
-          echo "Install with \`npm install -g @devops-daily/dailydev-cli@$VERSION\`." >> release-notes.md
+          echo "Install with \`npm install -g @devopsdaily/dailydev-cli@$VERSION\`." >> release-notes.md
           gh release view "$TAG" > /dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --notes-file release-notes.md --verify-tag
