@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [22.x, 24.x]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node-version }}
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - run: npm run build
+      - name: Run the built CLI
+        run: |
+          node dist/bin.js --version
+          node dist/bin.js --help | grep -q "Usage: dailydev"
+          # Without a token the CLI must stop before it calls the API.
+          ! DAILY_DEV_TOKEN= node dist/bin.js feed

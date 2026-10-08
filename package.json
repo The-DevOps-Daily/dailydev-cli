@@ -1,0 +1,50 @@
+{
+  "name": "dailydev-cli",
+  "version": "0.1.0",
+  "description": "Read daily.dev from your terminal: your feed, popular posts, search, comments and bookmarks, with --json for scripts and agents. Unofficial.",
+  "type": "module",
+  "bin": {
+    "dailydev": "./dist/bin.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "dev": "node src/bin.ts",
+    "prepack": "npm run build"
+  },
+  "keywords": [
+    "daily.dev",
+    "dailydev",
+    "cli",
+    "terminal",
+    "developer-news",
+    "feed",
+    "bookmarks",
+    "agents"
+  ],
+  "homepage": "https://github.com/The-DevOps-Daily/dailydev-cli#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/The-DevOps-Daily/dailydev-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/The-DevOps-Daily/dailydev-cli/issues"
+  },
+  "author": "DevOps Daily",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  }
+}
