@@ -125,7 +125,9 @@ export function createClient({ token, baseUrl = BASE_URL, userAgent = "dailydev-
 export type Client = ReturnType<typeof createClient>;
 
 function toApiError(res: Response, json: unknown): ApiError {
-  const apiMessage = typeof json === "object" && json !== null && "message" in json ? String((json as { message: unknown }).message) : "";
+  const rawMessage = typeof json === "object" && json !== null && "message" in json ? String((json as { message: unknown }).message) : "";
+  // Error text from the server goes to the terminal too, so it keeps printable characters only.
+  const apiMessage = rawMessage.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").trim().slice(0, 300);
   switch (res.status) {
     case 401:
       return new ApiError(`daily.dev did not accept the token. Create one at ${TOKEN_URL} and set DAILY_DEV_TOKEN.`, 401);

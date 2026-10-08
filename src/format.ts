@@ -13,6 +13,17 @@ export function createStyle(color: boolean): Style {
   return { bold: wrapAnsi(1, 22), dim: wrapAnsi(2, 22), accent: wrapAnsi(33, 39) };
 }
 
+// API text is written by other people. These characters can move the cursor, rewrite the screen,
+// set the terminal title or reorder what you read, so they never reach the terminal.
+const UNSAFE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g;
+
+export function stripControls<T>(value: T): T {
+  if (typeof value === "string") return value.replace(UNSAFE, "") as T;
+  if (Array.isArray(value)) return value.map(stripControls) as T;
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, stripControls(v)])) as T;
+  return value;
+}
+
 export function timeAgo(iso: string | null | undefined, now = Date.now()): string {
   if (!iso) return "";
   const seconds = Math.max(0, (now - Date.parse(iso)) / 1000);

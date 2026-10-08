@@ -240,3 +240,29 @@ describe("hardening", () => {
     expect(h.out()).toBe("");
   });
 });
+
+describe("untrusted text", () => {
+  it("removes terminal control sequences from API text, but not from --json", async () => {
+    const evil = post({ title: "Fine\x1b]0;pwned\x07 title\x1b[2J", summary: "a\rb‮evil" });
+    const h = harness({ "GET /public/v1/posts/D2ornCubs": { body: { data: evil } } });
+    await h.exec(["post", "D2ornCubs"]);
+    expect(h.out()).not.toMatch(/[\x00-\x08\x0b-\x1f\x7f]/);
+    expect(h.out()).not.toContain("‮");
+    expect(h.out()).toContain("Fine]0;pwned title[2J");
+
+    const j = harness({ "GET /public/v1/posts/D2ornCubs": { body: { data: evil } } });
+    await j.exec(["post", "D2ornCubs", "--json"]);
+    expect(JSON.parse(j.out()).data.title).toBe(evil.title);
+  });
+
+  it("cleans comment text and server error messages", async () => {
+    const comments = { data: [{ id: "c1", content: "hi\x1b[31m red", createdAt: "2026-10-08T11:00:00Z", permalink: "", numUpvotes: 0, author: { username: "x\x1b[0m" } }] };
+    const h = harness({ "GET /public/v1/posts/D2ornCubs/comments": { body: comments } });
+    await h.exec(["comments", "D2ornCubs"]);
+    expect(h.out()).not.toContain("\x1b");
+
+    const e = harness({ "GET /public/v1/feeds/foryou": { status: 500, body: { message: "boom\x1b[2J" } } });
+    await e.exec(["feed"]);
+    expect(e.err()).not.toContain("\x1b");
+  });
+});

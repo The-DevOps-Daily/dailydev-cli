@@ -80,6 +80,7 @@ Exit codes: `0` success, `1` an API or network error, `2` a usage error. Errors 
 - Posts shared in a squad have no title in the public API, so the CLI shows who shared it and where.
 - `DAILY_DEV_API_URL` changes the API base URL, for testing.
 - The token goes only to the API base URL. The CLI does not follow redirects.
+- Titles, summaries and comments come from other people, so the CLI removes terminal control characters from them before it prints. `--json` output is unchanged, because JSON escapes those characters.
 
 ## Development
 

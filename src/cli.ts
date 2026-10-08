@@ -1,6 +1,6 @@
 import { parseArgs } from "node:util";
 import { ApiError, BASE_URL, TOKEN_URL, createClient, type Client, type Comment, type Page, type Post } from "./api.ts";
-import { createStyle, formatComments, formatPost, formatPostList, plural, type Style } from "./format.ts";
+import { createStyle, formatComments, formatPost, formatPostList, plural, stripControls, type Style } from "./format.ts";
 import { VERSION } from "./version.ts";
 
 export interface Io {
@@ -210,8 +210,9 @@ function printJson(ctx: Context, value: unknown) {
 }
 
 async function listPosts(ctx: Context, path: string, query: Record<string, string | number | boolean | undefined>, empty: string) {
-  const res = await ctx.client.get<Page<Post>>(path, { limit: limit(ctx), cursor: opt(ctx, "cursor"), ...query });
-  if (ctx.opts.json) return printJson(ctx, res);
+  const raw = await ctx.client.get<Page<Post>>(path, { limit: limit(ctx), cursor: opt(ctx, "cursor"), ...query });
+  if (ctx.opts.json) return printJson(ctx, raw);
+  const res = stripControls(raw);
   if (!res.data.length) return print(ctx, empty);
   print(ctx, formatPostList(res.data, ctx.style, ctx.io.now));
   printNextPage(ctx, res);
@@ -255,8 +256,9 @@ const COMMANDS: Record<string, { spec: Spec; handler: (ctx: Context) => Promise<
   post: {
     spec: { args: "<id|url>" },
     async handler(ctx) {
-      const res = await ctx.client.get<{ data: Post }>(`/posts/${postRef(ctx.args[0])}`);
-      if (ctx.opts.json) return printJson(ctx, res);
+      const raw = await ctx.client.get<{ data: Post }>(`/posts/${postRef(ctx.args[0])}`);
+      if (ctx.opts.json) return printJson(ctx, raw);
+      const res = stripControls(raw);
       print(ctx, formatPost(res.data, ctx.style, ctx.width, ctx.io.now));
     },
   },
@@ -264,12 +266,13 @@ const COMMANDS: Record<string, { spec: Spec; handler: (ctx: Context) => Promise<
   comments: {
     spec: { paged: true, options: ["sort"], args: "<id|url>" },
     async handler(ctx) {
-      const res = await ctx.client.get<Page<Comment>>(`/posts/${postRef(ctx.args[0])}/comments`, {
+      const raw = await ctx.client.get<Page<Comment>>(`/posts/${postRef(ctx.args[0])}/comments`, {
         limit: limit(ctx),
         cursor: opt(ctx, "cursor"),
         sort: opt(ctx, "sort"),
       });
-      if (ctx.opts.json) return printJson(ctx, res);
+      if (ctx.opts.json) return printJson(ctx, raw);
+      const res = stripControls(raw);
       if (!res.data.length) return print(ctx, "No comments yet.");
       print(ctx, formatComments(res.data, ctx.style, ctx.width, ctx.io.now));
       printNextPage(ctx, res);
@@ -310,8 +313,9 @@ const COMMANDS: Record<string, { spec: Spec; handler: (ctx: Context) => Promise<
     spec: { args: "<words>..." },
     async handler(ctx) {
       const q = ctx.args.join(" ");
-      const res = await ctx.client.get<{ data: { name: string }[] }>("/search/tags", { q });
-      if (ctx.opts.json) return printJson(ctx, res);
+      const raw = await ctx.client.get<{ data: { name: string }[] }>("/search/tags", { q });
+      if (ctx.opts.json) return printJson(ctx, raw);
+      const res = stripControls(raw);
       if (!res.data.length) return print(ctx, `No tags match "${q}".`);
       print(ctx, res.data.map((t) => t.name).join("\n"));
     },
@@ -320,8 +324,9 @@ const COMMANDS: Record<string, { spec: Spec; handler: (ctx: Context) => Promise<
   whoami: {
     spec: {},
     async handler(ctx) {
-      const res = await ctx.client.get<Profile | { data: Profile }>("/profile/");
-      if (ctx.opts.json) return printJson(ctx, res);
+      const raw = await ctx.client.get<Profile | { data: Profile }>("/profile/");
+      if (ctx.opts.json) return printJson(ctx, raw);
+      const res = stripControls(raw);
       const p: Profile = "data" in res ? res.data : res;
       const lines = [`${ctx.style.bold(p.name)} ${ctx.style.dim(`@${p.username}`)}`, `Reputation  ${p.reputation}`];
       if (p.streak) lines.push(`Streak      ${plural(p.streak.current, "day")} (longest ${p.streak.max})`);
