@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.1.1] - 2026-10-08
+
+- After a full page, the CLI prints the whole command for the next page, ready to copy, instead of only the cursor.
+
 ## [0.1.0] - 2026-10-08
 
 First release.

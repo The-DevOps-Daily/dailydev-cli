@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Post } from "../src/api.ts";
-import { postRef, run } from "../src/cli.ts";
+import { nextPageCommand, postRef, run } from "../src/cli.ts";
 import { formatPostList, createStyle, timeAgo, wrap } from "../src/format.ts";
 
 const NOW = Date.parse("2026-10-08T12:00:00Z");
@@ -117,7 +117,7 @@ describe("output", () => {
     expect(h.out()).toContain("1. A Missing Binary");
     expect(h.out()).toContain("Cloud Native Now · 27 upvotes · 2 comments · 5 min read · 13d ago");
     expect(h.out()).toContain("id D2ornCubs");
-    expect(h.out()).toContain("--cursor abc");
+    expect(h.out()).toContain("More: dailydev feed --cursor abc");
     expect(h.out()).not.toContain("\x1b[");
   });
 
@@ -162,6 +162,11 @@ describe("errors", () => {
 });
 
 describe("helpers", () => {
+  it("prints the next page as a full command", () => {
+    expect(nextPageCommand(["search", "terraform", "state", "lock", "--cursor", "old"], "YXJy==")).toBe("dailydev search terraform state lock --cursor YXJy==");
+    expect(nextPageCommand(["bookmarks", "--search", "it's slow", "--cursor=old"], "abc")).toBe("dailydev bookmarks --search 'it'\\''s slow' --cursor abc");
+  });
+
   it("takes the slug from a daily.dev URL", () => {
     expect(postRef("https://daily.dev/posts/a-missing-binary-d2orncubs?utm=x")).toBe("a-missing-binary-d2orncubs");
     expect(postRef("D2ornCubs")).toBe("D2ornCubs");

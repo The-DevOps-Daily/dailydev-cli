@@ -22,7 +22,7 @@ $ dailydev search terraform state lock -n 2
    Spacelift · 0 upvotes · 0 comments · 15 min read · 7mo ago
    https://daily.dev/posts/terraform-state-lock-how-it-works-best-practices-exnksecg7  id eXNKSecg7
 
-More: add --cursor YXJyYXljb25uZWN0aW9uOjI=
+More: dailydev search terraform state lock -n 2 --cursor YXJyYXljb25uZWN0aW9uOjI=
 ```
 
 ## Commands
@@ -45,7 +45,7 @@ More: add --cursor YXJyYXljb25uZWN0aW9uOjI=
 The commands that list posts or comments also take:
 
 - `-n, --limit <n>`: how many results, from 1 to 50 (default 10)
-- `--cursor <cursor>`: the next page; the CLI prints the cursor after a full page
+- `--cursor <cursor>`: the next page; after a full page, the CLI prints the command for the next one
 
 Every command takes:
 

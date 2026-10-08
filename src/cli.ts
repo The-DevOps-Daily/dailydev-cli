@@ -102,6 +102,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
     style: createStyle(color),
     width: Math.min(io.stdout.columns || 80, 100),
     command,
+    argv,
   };
 
   try {
@@ -124,6 +125,7 @@ interface Context {
   style: Style;
   width: number;
   command: string;
+  argv: string[];
 }
 
 const GLOBAL_OPTIONS = new Set(["json", "color", "no-color", "help", "version"]);
@@ -220,8 +222,25 @@ async function listPosts(ctx: Context, path: string, query: Record<string, strin
 
 function printNextPage(ctx: Context, res: Page<unknown>) {
   if (res.pagination?.hasNextPage && res.pagination.cursor) {
-    print(ctx, ctx.style.dim(`\nMore: add --cursor ${res.pagination.cursor}`));
+    print(ctx, ctx.style.dim(`\nMore: ${nextPageCommand(ctx.argv, res.pagination.cursor)}`));
   }
+}
+
+/** The same command line with the new cursor, ready to copy. */
+export function nextPageCommand(argv: string[], cursor: string): string {
+  const kept: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "--cursor") {
+      i++;
+      continue;
+    }
+    if (!argv[i].startsWith("--cursor=")) kept.push(argv[i]);
+  }
+  return ["dailydev", ...kept, "--cursor", cursor].map(shellQuote).join(" ");
+}
+
+function shellQuote(arg: string): string {
+  return /^[\w@%+=:,./-]+$/.test(arg) ? arg : `'${arg.replace(/'/g, "'\\''")}'`;
 }
 
 const COMMANDS: Record<string, { spec: Spec; handler: (ctx: Context) => Promise<void> }> = {
