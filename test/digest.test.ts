@@ -304,6 +304,10 @@ describe("digest --email", () => {
     expect(await bad.exec(emailArgs, sendEnv())).toBe(1);
     expect(bad.err()).toBe("SMTPfast refused the email (401): Invalid API key Check SMTPFAST_API_KEY.\n");
 
+    const echo = harness({ [SEND]: { status: 401, body: { error: `Invalid key ${KEY}` } } });
+    expect(await echo.exec(emailArgs, sendEnv())).toBe(1);
+    expect(echo.err()).toBe("SMTPfast refused the email (401): Invalid key [key] Check SMTPFAST_API_KEY.\n");
+
     const down = harness({ [SEND]: { status: 502, body: { error: "Bad gateway\x1b[2J" } } });
     expect(await down.exec(emailArgs, sendEnv())).toBe(1);
     expect(down.err()).toContain("SMTPfast answered 502: Bad gateway");
@@ -350,6 +354,10 @@ describe("digest --email", () => {
     expect(await h.exec(["digest", "--email", "me@team.dev\r\n", "--from", "digest@team.dev"], sendEnv())).toBe(2);
     expect(await h.exec(["digest", "--email", "me@team.dev", "--from", "digest@team.dev\n"], sendEnv())).toBe(2);
     expect(await h.exec(["digest", "--email", "me@team.dev"], sendEnv({ SMTPFAST_FROM: "digest@team.dev\r\n" }))).toBe(2);
+    // Bidi controls would reorder what the reader sees in the headers.
+    expect(await h.exec(["digest", "--email", "me@team.dev\u202e", "--from", "digest@team.dev"], sendEnv())).toBe(2);
+    expect(await h.exec(["digest", "--email", "me@team.dev", "--from", "Digest \u2066 <digest@team.dev>"], sendEnv())).toBe(2);
+    expect(await h.exec(["digest", "search", "a\u202eb", "--email", "me@team.dev", "--from", "digest@team.dev"], sendEnv())).toBe(2);
     expect(h.calls).toHaveLength(0);
   });
 
@@ -456,6 +464,19 @@ describe("digest --schedule", () => {
     const all = harness();
     await all.exec(["digest", "discussed", "--tag", "rust", "-n", "5", "--format", "text", "--schedule", "--json"], {});
     expect(JSON.parse(all.out()).cron).toBe("0 8 * * 1 dailydev digest discussed --tags rust --limit 5 --format text");
+  });
+
+  it("keeps search words that look like options after --, so a replay cannot send email", async () => {
+    const h = harness();
+    expect(await h.exec(["digest", "search", "--schedule", "--json", "--", "rust", "--email=extra@team.dev", "--from=d@team.dev"], {})).toBe(0);
+    const { cron } = JSON.parse(h.out());
+    expect(cron).toBe("0 8 * * 1 dailydev digest -- search rust --email=extra@team.dev --from=d@team.dev");
+
+    const replay = harness({ [SEND]: { body: { id: "em_1" } } });
+    const argv = cron.replace("0 8 * * 1 dailydev ", "").split(" ");
+    expect(await replay.exec(argv, sendEnv())).toBe(0);
+    expect(replay.sends()).toHaveLength(0);
+    expect(replay.calls[0].url.searchParams.get("q")).toBe("rust --email=extra@team.dev --from=d@team.dev");
   });
 
   it("refuses ${{ }}, which GitHub would evaluate inside the workflow", async () => {

@@ -25,6 +25,8 @@ const UNSURE = "The email may or may not have gone out. Check your SMTPfast dash
 
 /** One POST to SMTPfast. Nothing is retried, so one run never sends twice. */
 export async function sendEmail({ apiKey, message, userAgent = "dailydev-cli", fetch: fetchImpl = fetch, timeoutMs = 30_000 }: SendOptions): Promise<{ id: string }> {
+  // In case a response ever quotes the key back.
+  const redact = (s: string) => (apiKey ? s.split(apiKey).join("[key]") : s);
   let res: Response;
   let text: string;
   try {
@@ -62,12 +64,12 @@ export async function sendEmail({ apiKey, message, userAgent = "dailydev-cli", f
 
   if (res.ok) {
     const id = typeof json === "object" && json !== null ? (json as { id?: unknown }).id : undefined;
-    if (typeof id === "string" && id) return { id: clean(id) };
+    if (typeof id === "string" && id) return { id: redact(clean(id)) };
     throw new ApiError(`SMTPfast answered ${res.status} without an email id. ${UNSURE}`, res.status);
   }
 
   const raw = typeof json === "object" && json !== null ? (json as { error?: unknown }).error : undefined;
-  const detail = typeof raw === "string" ? clean(raw) : "";
+  const detail = typeof raw === "string" ? redact(clean(raw)) : "";
   const what = res.status >= 500 ? `SMTPfast answered ${res.status}` : `SMTPfast refused the email (${res.status})`;
   const parts = [detail ? `${what}: ${detail}` : `${what}.`];
   if (res.status === 401) parts.push("Check SMTPFAST_API_KEY.");
