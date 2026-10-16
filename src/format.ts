@@ -120,3 +120,7 @@ export function formatComments(comments: Comment[], style: Style, width: number,
     })
     .join("\n\n");
 }
+
+export function shellQuote(arg: string): string {
+  return /^[\w@%+=:,./-]+$/.test(arg) ? arg : `'${arg.replace(/'/g, "'\\''")}'`;
+}

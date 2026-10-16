@@ -47,6 +47,34 @@ export interface Page<T> {
 
 export type Query = Record<string, string | number | boolean | undefined>;
 
+/** The post lists the CLI reads. The list commands and the digest share them. */
+export type Feed =
+  | { kind: "feed" }
+  | { kind: "popular"; tags?: string }
+  | { kind: "discussed"; period?: string; tag?: string }
+  | { kind: "tag"; tag: string }
+  | { kind: "search"; q: string; time?: string }
+  | { kind: "bookmarks"; search?: string; unread?: boolean };
+
+export function feedRequest(feed: Feed): { path: string; query: Query } {
+  switch (feed.kind) {
+    case "feed":
+      return { path: "/feeds/foryou", query: {} };
+    case "popular":
+      return { path: "/feeds/popular", query: { tags: feed.tags } };
+    case "discussed":
+      return { path: "/feeds/discussed", query: { period: feed.period, tag: feed.tag } };
+    case "tag":
+      return { path: `/feeds/tag/${encodeURIComponent(feed.tag)}`, query: {} };
+    case "search":
+      return { path: "/search/posts", query: { q: feed.q, time: feed.time } };
+    case "bookmarks":
+      return feed.search
+        ? { path: "/bookmarks/search", query: { q: feed.search, unreadOnly: feed.unread ? "true" : undefined } }
+        : { path: "/bookmarks/", query: { unreadOnly: feed.unread ? "true" : undefined } };
+  }
+}
+
 export class ApiError extends Error {
   readonly status: number;
 

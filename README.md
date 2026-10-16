@@ -41,6 +41,7 @@ More: dailydev search terraform state lock -n 2 --cursor YXJyYXljb25uZWN0aW9uOjI
 | `dailydev unbookmark <id\|url>` | Remove a bookmark |
 | `dailydev tags <words>` | Find tag names to use with `tag` and `--tag` |
 | `dailydev whoami` | Your profile and reading streak |
+| `dailydev digest [source]` | A digest to print or send by email, see [Email digest](#email-digest) |
 
 The commands that list posts or comments also take:
 
@@ -59,6 +60,39 @@ A post id is case sensitive. You can always paste the daily.dev URL of a post in
 ## Search tips
 
 The search matches keywords, not sentences. `dailydev search another operation is in progress` finds nothing, and `dailydev search ImagePullBackOff` finds several posts. Use one to three words.
+
+## Email digest
+
+`dailydev digest` builds a digest of posts and prints it as Markdown, or as text or HTML with `--format text` or `--format html`. The source is one of:
+
+- `popular` (the default), with `--tags kubernetes,docker` for some tags
+- `discussed`: the most discussed posts of the week, with `--tags rust` for one tag
+- `tag <tag>`
+- `search <words>`: the posts daily.dev added in the last `--days` days (default 7)
+- `feed`: your For You feed
+- `bookmarks`
+
+`--limit` sets how many posts (default 10). With `--json`, the CLI prints the subject and the posts as the API sends them.
+
+`--email` sends the digest through [SMTPfast](https://smtpfa.st) with your own API key. Give it more than once, or comma separate the addresses. All recipients go in the To field of one email, so they see each other's addresses. The From address comes from `--from` or `SMTPFAST_FROM`, and it must be on a domain you verified in your SMTPfast account.
+
+```bash
+export SMTPFAST_API_KEY="sf_..."
+export SMTPFAST_FROM="Digest <digest@yourdomain.dev>"
+
+# Show the subject, the recipients and the posts, and send nothing
+dailydev digest popular --tags kubernetes,docker --email you@yourdomain.dev --dry-run
+
+dailydev digest popular --tags kubernetes,docker --email you@yourdomain.dev,team@yourdomain.dev
+```
+
+`--schedule` prints a weekly cron line and a GitHub Actions workflow that run the same command, without `--dry-run`. It runs nothing. The workflow reads the repository secrets `DAILY_DEV_TOKEN` and `SMTPFAST_API_KEY`.
+
+```bash
+dailydev digest popular --tags kubernetes --email you@yourdomain.dev --schedule
+```
+
+The key goes only to `https://smtpfa.st/api/v1/emails`, and that URL is fixed. The CLI does not follow redirects and never prints the key. When the digest has no posts, the CLI sends no email.
 
 ## For scripts and agents
 
