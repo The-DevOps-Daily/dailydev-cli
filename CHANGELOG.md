@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.2.1] - 2026-10-16
+
+- `digest --dry-run` without `--email` prints the digest instead of failing: there is nothing to send.
+
 ## [0.2.0] - 2026-10-16
 
 - `digest` builds a digest of popular, discussed, tag, search, For You or bookmarked posts, and prints it as Markdown, text or HTML.

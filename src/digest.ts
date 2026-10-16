@@ -125,9 +125,8 @@ function readDigest(opts: Opts, args: string[], env: Record<string, string | und
 
   const emails = Array.isArray(opts.email) ? (opts.email as string[]) : typeof opts.email === "string" ? [opts.email] : undefined;
   if (!emails) {
-    for (const name of ["from", "dry-run"]) {
-      if (opts[name] !== undefined) return fail(`--${name} is only used with --email.`);
-    }
+    // Without --email nothing is sent anyway, so --dry-run just prints the digest.
+    if (opts.from !== undefined) return fail("--from is only used with --email.");
     // With --schedule, --json is for the schedule and --format for the scheduled command.
     if (opts.format !== undefined && opts.json && !opts.schedule) return fail("Give --format or --json, not both.");
     return { plan };

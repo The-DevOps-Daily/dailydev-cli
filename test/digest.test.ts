@@ -228,6 +228,15 @@ describe("digest --email", () => {
     expect(h.out() + h.err()).not.toMatch(/smtpfa|SMTPFAST/i);
   });
 
+  it("prints the digest for --dry-run without --email, since there is nothing to send", async () => {
+    const h = harness();
+    const plain = harness();
+    expect(await h.exec(["digest", "--tags", "kubernetes", "--dry-run"])).toBe(0);
+    expect(await plain.exec(["digest", "--tags", "kubernetes"])).toBe(0);
+    expect(h.out()).toBe(plain.out());
+    expect(h.out() + h.err()).not.toMatch(/smtpfa|SMTPFAST/i);
+  });
+
   it("shows the subject, recipients and posts on a dry run, and sends nothing", async () => {
     const h = harness();
     expect(await h.exec([...emailArgs, "--dry-run"], sendEnv())).toBe(0);
@@ -466,7 +475,6 @@ describe("digest --email", () => {
       ["digest", "--email", Array.from({ length: 101 }, (_, i) => `u${i}@team.dev`).join(","), "--from", "digest@team.dev"],
       ["digest", "--email", "me@team.dev", "--from", "digest@team.dev", "--format", "html"],
       ["digest", "--from", "digest@team.dev"],
-      ["digest", "--dry-run"],
       ["digest", "--format", "pdf"],
       ["digest", "--format", "html", "--json"],
       ["digest", "nope"],
