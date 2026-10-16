@@ -33,6 +33,19 @@ export function planDigest(opts: Opts, args: string[], env: Record<string, strin
   const fail = (error: string) => ({ error });
   const [source = "popular", ...rest] = args;
 
+  // Checked on the raw values, before any trimming: --schedule prints the command as it was typed.
+  for (const [name, value] of Object.entries(opts)) {
+    const values = Array.isArray(value) ? value : [value];
+    if (values.some((v) => typeof v === "string" && HEADER_UNSAFE.test(v))) return fail(`--${name} cannot contain line breaks or other control characters.`);
+  }
+  if (args.some((a) => HEADER_UNSAFE.test(a))) return fail("Tags and search words cannot contain line breaks or other control characters, because they go into the email subject.");
+  if (env.SMTPFAST_FROM && HEADER_UNSAFE.test(env.SMTPFAST_FROM)) return fail("SMTPFAST_FROM cannot contain line breaks or other control characters.");
+  if (opts.schedule) {
+    const typed = [...args, ...Object.values(opts).flat(), opts.email && opts.from === undefined ? env.SMTPFAST_FROM : undefined];
+    // GitHub reads ${{ ... }} as an expression even inside a quoted shell argument.
+    if (typed.some((v) => typeof v === "string" && v.includes("${{"))) return fail("--schedule cannot write ${{ into a GitHub Actions workflow, because GitHub reads it as an expression.");
+  }
+
   if (opts.tags !== undefined && opts.tag !== undefined) return fail("Give --tags or --tag, not both.");
   const tagsOpt = str(opts.tags) ?? str(opts.tag);
   const tags = tagsOpt

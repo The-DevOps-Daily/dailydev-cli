@@ -107,6 +107,12 @@ export async function run(argv: string[], io: Io): Promise<number> {
     return 2;
   }
 
+  const missing = spec.preflight?.(opts, io.env);
+  if (missing) {
+    io.stderr.write(`${missing}\n`);
+    return 1;
+  }
+
   const token = io.env.DAILY_DEV_TOKEN?.trim() ?? "";
   if (!token && !spec.tokenless?.(opts)) {
     io.stderr.write(`DAILY_DEV_TOKEN is not set. Create a token at ${TOKEN_URL}, then run:\n  export DAILY_DEV_TOKEN="dda_..."\n`);
@@ -168,6 +174,8 @@ interface Spec {
   check?: (opts: Record<string, unknown>, args: string[], env: Record<string, string | undefined>) => string | undefined;
   /** True when this run calls no API, so it needs no token. */
   tokenless?: (opts: Record<string, unknown>) => boolean;
+  /** A setting this run is missing, checked before the token. Printed as it is, with exit code 1. */
+  preflight?: (opts: Record<string, unknown>, env: Record<string, string | undefined>) => string | undefined;
 }
 
 export function checkUsage(command: string, spec: Spec, opts: Record<string, unknown>, args: string[]): string | undefined {
@@ -385,6 +393,14 @@ const COMMANDS: Record<string, { spec: Spec; handler: (ctx: Context) => Promise<
         return "error" in res ? res.error : undefined;
       },
       tokenless: (opts) => opts.schedule === true,
+      preflight: (opts, env) => {
+        if (opts.email === undefined || opts["dry-run"] || opts.schedule) return undefined;
+        const key = env.SMTPFAST_API_KEY?.trim();
+        if (!key) return MISSING_KEY;
+        // fetch refuses such a header with an error that can quote it, and a key never has these characters.
+        if (!/^[\x21-\x7e]+$/.test(key)) return "SMTPFAST_API_KEY has characters that an API key cannot have. Copy it again from your SMTPfast dashboard.";
+        return undefined;
+      },
     },
     handler: digest,
   },
@@ -401,12 +417,8 @@ async function digest(ctx: Context) {
     return ctx.opts.json ? printJson(ctx, schedule) : print(ctx, formatSchedule(schedule, plan));
   }
 
-  // Checked before any request, so a run that cannot send makes no API calls.
-  const sending = plan.email && !plan.email.dryRun;
+  // The preflight check has made sure that a send has a usable key.
   const apiKey = ctx.io.env.SMTPFAST_API_KEY?.trim() ?? "";
-  if (sending && !apiKey) throw new ApiError(MISSING_KEY, 0);
-  // fetch refuses such a header with an error that can quote it, and a key never has these characters.
-  if (sending && !/^[\x21-\x7e]+$/.test(apiKey)) throw new ApiError("SMTPFAST_API_KEY has characters that an API key cannot have. Copy it again from your SMTPfast dashboard.", 0);
 
   const { path, query } = digestRequest(plan);
   const raw = await ctx.client.get<Page<Post>>(path, query);

