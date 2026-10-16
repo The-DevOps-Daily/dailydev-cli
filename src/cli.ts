@@ -1,6 +1,8 @@
 import { parseArgs } from "node:util";
-import { ApiError, BASE_URL, TOKEN_URL, createClient, type Client, type Comment, type Page, type Post } from "./api.ts";
-import { createStyle, formatComments, formatPost, formatPostList, plural, stripControls, type Style } from "./format.ts";
+import { ApiError, BASE_URL, TOKEN_URL, createClient, feedRequest, type Client, type Comment, type Feed, type Page, type Post } from "./api.ts";
+import { buildDigest, digestRequest, formatSchedule, planDigest, renderDigest, renderHtml, renderText, renderTextList, scheduleText, selectPosts, type DigestPlan } from "./digest.ts";
+import { createStyle, formatComments, formatPost, formatPostList, plural, shellQuote, stripControls, type Style } from "./format.ts";
+import { MISSING_KEY, sendEach } from "./smtpfast.ts";
 import { VERSION } from "./version.ts";
 
 export interface Io {
@@ -28,6 +30,8 @@ Commands:
   unbookmark <id|url>    Remove a bookmark
   tags <words>           Find tag names
   whoami                 Your profile and reading streak
+  digest [source]        A digest to print or email; the source is popular (default),
+                         discussed, tag <tag>, search <words>, feed or bookmarks
 
 Options:
   -n, --limit <n>        How many results (default 10)
@@ -36,6 +40,15 @@ Options:
   --no-color             Turn off colors (NO_COLOR also works)
   -h, --help             Show this help
   -v, --version          Show the version
+
+Digest options:
+  --tags <tags>          Tags for popular, or one tag for discussed
+  --days <n>             For search: posts added in the last n days (default 7)
+  --format <format>      markdown, text or html (default markdown)
+  --email <address>      Send it with SMTPfast (needs SMTPFAST_API_KEY); repeat or comma separate
+  --from <address>       The From address, on a domain verified in SMTPfast (or SMTPFAST_FROM)
+  --dry-run              With --email: show the email and send nothing
+  --schedule             Print a weekly cron line and a GitHub Actions workflow for the command
 
 Set DAILY_DEV_TOKEN to a personal access token from ${TOKEN_URL}.
 `;
@@ -54,6 +67,13 @@ const OPTIONS = {
   sort: { type: "string" },
   unread: { type: "boolean" },
   search: { type: "string" },
+  tags: { type: "string" },
+  days: { type: "string" },
+  format: { type: "string" },
+  email: { type: "string", multiple: true },
+  from: { type: "string" },
+  "dry-run": { type: "boolean" },
+  schedule: { type: "boolean" },
 } as const;
 
 export async function run(argv: string[], io: Io): Promise<number> {
@@ -81,14 +101,20 @@ export async function run(argv: string[], io: Io): Promise<number> {
     return 2;
   }
   const { spec, handler } = COMMANDS[command];
-  const problem = checkUsage(command, spec, opts, args);
+  const problem = checkUsage(command, spec, opts, args) ?? spec.check?.(opts, args, io.env);
   if (problem) {
     io.stderr.write(`${problem}\nRun dailydev --help for usage.\n`);
     return 2;
   }
 
-  const token = io.env.DAILY_DEV_TOKEN?.trim();
-  if (!token) {
+  const missing = spec.preflight?.(opts, io.env);
+  if (missing) {
+    io.stderr.write(`${missing}\n`);
+    return 1;
+  }
+
+  const token = io.env.DAILY_DEV_TOKEN?.trim() ?? "";
+  if (!token && !spec.tokenless?.(opts)) {
     io.stderr.write(`DAILY_DEV_TOKEN is not set. Create a token at ${TOKEN_URL}, then run:\n  export DAILY_DEV_TOKEN="dda_..."\n`);
     return 1;
   }
@@ -119,7 +145,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
 
 interface Context {
   client: Client;
-  opts: Record<string, string | boolean | undefined>;
+  opts: Record<string, string | boolean | string[] | undefined>;
   args: string[];
   io: Io;
   style: Style;
@@ -133,6 +159,7 @@ const CHOICES: Record<string, string[]> = {
   period: ["7", "30", "365"],
   time: ["day", "week", "month", "year", "all"],
   sort: ["oldest", "newest"],
+  format: ["markdown", "text", "html"],
 };
 
 interface Spec {
@@ -143,6 +170,12 @@ interface Spec {
   /** Lists take --limit and --cursor. */
   paged?: boolean;
   maxArgs?: number;
+  /** Checks of its own, after the common ones. Returns the problem, if any. */
+  check?: (opts: Record<string, unknown>, args: string[], env: Record<string, string | undefined>) => string | undefined;
+  /** True when this run calls no API, so it needs no token. */
+  tokenless?: (opts: Record<string, unknown>) => boolean;
+  /** A setting this run is missing, checked before the token. Printed as it is, with exit code 1. */
+  preflight?: (opts: Record<string, unknown>, env: Record<string, string | undefined>) => string | undefined;
 }
 
 export function checkUsage(command: string, spec: Spec, opts: Record<string, unknown>, args: string[]): string | undefined {
@@ -211,7 +244,8 @@ function printJson(ctx: Context, value: unknown) {
   print(ctx, JSON.stringify(value, null, 2));
 }
 
-async function listPosts(ctx: Context, path: string, query: Record<string, string | number | boolean | undefined>, empty: string) {
+async function listPosts(ctx: Context, feed: Feed, empty: string) {
+  const { path, query } = feedRequest(feed);
   const raw = await ctx.client.get<Page<Post>>(path, { limit: limit(ctx), cursor: opt(ctx, "cursor"), ...query });
   if (ctx.opts.json) return printJson(ctx, raw);
   const res = stripControls(raw);
@@ -239,28 +273,24 @@ export function nextPageCommand(argv: string[], cursor: string): string {
   return ["dailydev", ...kept, "--cursor", cursor].map(shellQuote).join(" ");
 }
 
-function shellQuote(arg: string): string {
-  return /^[\w@%+=:,./-]+$/.test(arg) ? arg : `'${arg.replace(/'/g, "'\\''")}'`;
-}
-
 const COMMANDS: Record<string, { spec: Spec; handler: (ctx: Context) => Promise<void> }> = {
-  feed: { spec: { paged: true }, handler: (ctx) => listPosts(ctx, "/feeds/foryou", {}, "Your feed is empty.") },
+  feed: { spec: { paged: true }, handler: (ctx) => listPosts(ctx, { kind: "feed" }, "Your feed is empty.") },
 
   popular: {
     spec: { paged: true, options: ["tag"] },
-    handler: (ctx) => listPosts(ctx, "/feeds/popular", { tags: opt(ctx, "tag") }, "No popular posts found."),
+    handler: (ctx) => listPosts(ctx, { kind: "popular", tags: opt(ctx, "tag") }, "No popular posts found."),
   },
 
   discussed: {
     spec: { paged: true, options: ["period", "tag"] },
-    handler: (ctx) => listPosts(ctx, "/feeds/discussed", { period: opt(ctx, "period"), tag: opt(ctx, "tag") }, "No discussed posts found."),
+    handler: (ctx) => listPosts(ctx, { kind: "discussed", period: opt(ctx, "period"), tag: opt(ctx, "tag") }, "No discussed posts found."),
   },
 
   tag: {
     spec: { paged: true, args: "<tag>" },
     handler: (ctx) => {
       const tag = ctx.args[0];
-      return listPosts(ctx, `/feeds/tag/${encodeURIComponent(tag)}`, {}, `No posts for #${tag}. Find tag names with: dailydev tags ${tag}`);
+      return listPosts(ctx, { kind: "tag", tag }, `No posts for #${tag}. Find tag names with: dailydev tags ${tag}`);
     },
   },
 
@@ -268,7 +298,7 @@ const COMMANDS: Record<string, { spec: Spec; handler: (ctx: Context) => Promise<
     spec: { paged: true, options: ["time"], args: "<words>..." },
     handler: (ctx) => {
       const q = ctx.args.join(" ");
-      return listPosts(ctx, "/search/posts", { q, time: opt(ctx, "time") }, `No posts found for "${q}". Try fewer words: the search matches keywords, not sentences.`);
+      return listPosts(ctx, { kind: "search", q, time: opt(ctx, "time") }, `No posts found for "${q}". Try fewer words: the search matches keywords, not sentences.`);
     },
   },
 
@@ -302,7 +332,7 @@ const COMMANDS: Record<string, { spec: Spec; handler: (ctx: Context) => Promise<
     spec: { paged: true, options: ["unread", "search"] },
     handler: (ctx) => {
       const search = opt(ctx, "search");
-      return listPosts(ctx, search ? "/bookmarks/search" : "/bookmarks/", { q: search, unreadOnly: ctx.opts.unread ? "true" : undefined }, search ? `No bookmarks match "${search}".` : "You have no bookmarks.");
+      return listPosts(ctx, { kind: "bookmarks", search, unread: ctx.opts.unread === true }, search ? `No bookmarks match "${search}".` : "You have no bookmarks.");
     },
   },
 
@@ -353,7 +383,89 @@ const COMMANDS: Record<string, { spec: Spec; handler: (ctx: Context) => Promise<
       print(ctx, lines.join("\n"));
     },
   },
+
+  digest: {
+    spec: {
+      options: ["limit", "tags", "tag", "days", "format", "email", "from", "dry-run", "schedule"],
+      maxArgs: Infinity,
+      check: (opts, args, env) => {
+        const res = planDigest(opts, args, env);
+        return "error" in res ? res.error : undefined;
+      },
+      tokenless: (opts) => opts.schedule === true,
+      preflight: (opts, env) => {
+        if (opts.email === undefined || opts["dry-run"] || opts.schedule) return undefined;
+        const key = env.SMTPFAST_API_KEY?.trim();
+        if (!key) return MISSING_KEY;
+        // fetch refuses such a header with an error that can quote it, and a key never has these characters.
+        if (!/^[\x21-\x7e]+$/.test(key)) return "SMTPFAST_API_KEY has characters that an API key cannot have. Copy it again from your SMTPfast dashboard.";
+        return undefined;
+      },
+    },
+    handler: digest,
+  },
 };
+
+async function digest(ctx: Context) {
+  const planned = planDigest(ctx.opts, ctx.args, ctx.io.env);
+  if ("error" in planned) throw new Error(planned.error);
+  const { plan } = planned;
+  const now = ctx.io.now ?? Date.now();
+
+  if (ctx.opts.schedule) {
+    const schedule = scheduleText(plan);
+    return ctx.opts.json ? printJson(ctx, schedule) : print(ctx, formatSchedule(schedule, plan));
+  }
+
+  // The preflight check has made sure that a send has a usable key.
+  const apiKey = ctx.io.env.SMTPFAST_API_KEY?.trim() ?? "";
+
+  const { path, query } = digestRequest(plan);
+  const raw = await ctx.client.get<Page<Post>>(path, query);
+  const posts = selectPosts(plan, raw.data ?? [], now);
+  const d = buildDigest(plan, stripControls(posts), now);
+  const json = { subject: d.subject, posts };
+
+  if (!plan.email) {
+    if (ctx.opts.json) return printJson(ctx, json);
+    if (!posts.length) return print(ctx, digestEmpty(plan));
+    return print(ctx, renderDigest(d, plan.format, now));
+  }
+
+  const { from, to, dryRun } = plan.email;
+  if (dryRun) {
+    if (ctx.opts.json) return printJson(ctx, { dryRun: true, from, to, ...json });
+    const each = to.length > 1 ? " (one email each)" : "";
+    const head = ["Dry run: nothing was sent.", `From:    ${from}`, `To:      ${to.join(", ")}${each}`, `Subject: ${d.subject}`].join("\n");
+    return print(ctx, `${head}\n\n${posts.length ? renderTextList(d, now) : `${digestEmpty(plan)} A real run sends no email.`}`);
+  }
+
+  if (!posts.length) {
+    if (ctx.opts.json) return printJson(ctx, { from, to, results: [], ...json });
+    return print(ctx, `${digestEmpty(plan)} No email was sent.`);
+  }
+  const results = await sendEach({
+    apiKey,
+    message: { from, to, subject: d.subject, html: renderHtml(d, now), text: renderText(d, now) },
+    userAgent: `dailydev-cli/${VERSION}`,
+    fetch: ctx.io.fetch,
+  });
+  const accepted = results.filter((r) => r.accepted).length;
+  if (ctx.opts.json) {
+    printJson(ctx, { from, to, results, ...json });
+  } else {
+    const width = Math.max(...results.map((r) => r.to.length));
+    // Accepted means SMTPfast has the email; delivery comes later.
+    const lines = results.map((r) => `  ${r.to.padEnd(width)}  ${r.accepted ? `accepted (${r.status ?? "queued"}), id ${r.id}` : `not sent: ${r.error}`}`);
+    const count = accepted === results.length ? plural(accepted, "recipient") : `${accepted} of ${plural(results.length, "recipient")}`;
+    print(ctx, [`SMTPfast accepted "${d.subject}" for ${count}, one email each:`, ...lines].join("\n"));
+  }
+  if (accepted < results.length) throw new ApiError(`Not accepted: ${results.length - accepted} of ${plural(results.length, "email")}.`, 0);
+}
+
+function digestEmpty(plan: DigestPlan): string {
+  return plan.days === undefined ? "No posts found for this digest." : `No posts found in the last ${plural(plan.days, "day")}. Try fewer words or more --days.`;
+}
 
 interface Profile {
   name: string;

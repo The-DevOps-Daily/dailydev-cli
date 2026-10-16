@@ -1,6 +1,6 @@
 {
   "name": "@devopsdaily/dailydev-cli",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Read daily.dev from your terminal: your feed, popular posts, search, comments and bookmarks, with --json for scripts and agents. Unofficial.",
   "type": "module",
   "bin": {
