@@ -76,7 +76,7 @@ The search matches keywords, not sentences. `dailydev search another operation i
 
 `--email` sends the digest through [SMTPfast](https://smtpfa.st) with your own API key. Give it more than once, or comma separate the addresses (up to 100). Each recipient gets an email of their own, so nobody sees the other addresses; the CLI sends them in one SMTPfast batch call. The From address comes from `--from` or `SMTPFAST_FROM`, and it must be on a domain you verified in your SMTPfast account.
 
-The CLI prints the result for each recipient, sent or the reason it was not, and exits 1 if any email was not sent. SMTPfast accepts or refuses a batch as a whole, so when it refuses one, no email goes out.
+The CLI prints the result for each recipient: accepted (SMTPfast queued it for delivery) or the reason it was not, and it exits 1 if SMTPfast did not accept every email. `--json` has SMTPfast's exact status for each one. SMTPfast accepts or refuses a batch as a whole, so when it refuses one, no email goes out.
 
 ```bash
 export SMTPFAST_API_KEY="sf_..."
@@ -94,7 +94,7 @@ dailydev digest popular --tags kubernetes,docker --email you@yourdomain.dev,team
 dailydev digest popular --tags kubernetes --email you@yourdomain.dev --schedule
 ```
 
-The key goes only to `https://smtpfa.st/api/v1/emails`, and that URL is fixed. The CLI does not follow redirects and never prints the key. When the digest has no posts, the CLI sends no email.
+The key goes only to `https://smtpfa.st/api/v1/emails/batch`, and that URL is fixed. The CLI does not follow redirects and never prints the key. When the digest has no posts, the CLI sends no email.
 
 ## For scripts and agents
 

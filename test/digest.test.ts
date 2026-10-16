@@ -273,7 +273,7 @@ describe("digest --email", () => {
     expect(items[0].html).toContain("A Missing Binary Turned a Kubernetes Liveness Probe Into a Restart Loop");
     expect(items[0].text).toMatch(/^Popular on daily\.dev \(2026-10-08\)\n\n1\. A Missing Binary/);
 
-    expect(h.out()).toBe('Sent "Popular on daily.dev (2026-10-08)" to 1 recipient, one email each:\n  a@team.dev  sent, id em_1\n');
+    expect(h.out()).toBe('SMTPfast accepted "Popular on daily.dev (2026-10-08)" for 1 recipient, one email each:\n  a@team.dev  accepted (queued), id em_1\n');
     expect(h.err()).toBe("");
     expect(h.out() + h.err()).not.toContain(KEY);
   });
@@ -289,10 +289,10 @@ describe("digest --email", () => {
 
     expect(h.out()).toBe(
       [
-        'Sent "Popular on daily.dev (2026-10-08)" to 3 recipients, one email each:',
-        "  a@team.dev  sent, id em_1",
-        "  b@team.dev  sent, id em_2",
-        "  c@team.dev  sent, id em_3",
+        'SMTPfast accepted "Popular on daily.dev (2026-10-08)" for 3 recipients, one email each:',
+        "  a@team.dev  accepted (queued), id em_1",
+        "  b@team.dev  accepted (queued), id em_2",
+        "  c@team.dev  accepted (queued), id em_3",
         "",
       ].join("\n"),
     );
@@ -303,21 +303,21 @@ describe("digest --email", () => {
     expect(await h.exec(emailArgs, sendEnv())).toBe(1);
     expect(h.out()).toBe(
       [
-        'Sent "Popular on daily.dev (2026-10-08)" to 2 of 3 recipients, one email each:',
-        "  a@team.dev  sent, id em_1",
+        'SMTPfast accepted "Popular on daily.dev (2026-10-08)" for 2 of 3 recipients, one email each:',
+        "  a@team.dev  accepted (queued), id em_1",
         "  b@team.dev  not sent: SMTPfast did not send it, because the address is suppressed after an earlier bounce, complaint or unsubscribe.",
-        "  c@team.dev  sent, id em_3",
+        "  c@team.dev  accepted (queued), id em_3",
         "",
       ].join("\n"),
     );
-    expect(h.err()).toBe("Not sent: 1 of 3 emails.\n");
+    expect(h.err()).toBe("Not accepted: 1 of 3 emails.\n");
 
     const j = harness({ [SEND]: batch("queued", "failed", "queued") });
     expect(await j.exec([...emailArgs, "--json"], sendEnv())).toBe(1);
     expect(JSON.parse(j.out()).results).toEqual([
-      { to: "a@team.dev", sent: true, id: "em_1" },
-      { to: "b@team.dev", sent: false, id: "em_2", error: expect.stringContaining("suppressed") },
-      { to: "c@team.dev", sent: true, id: "em_3" },
+      { to: "a@team.dev", accepted: true, status: "queued", id: "em_1" },
+      { to: "b@team.dev", accepted: false, status: "failed", id: "em_2", error: expect.stringContaining("suppressed") },
+      { to: "c@team.dev", accepted: true, status: "queued", id: "em_3" },
     ]);
   });
 
@@ -333,7 +333,7 @@ describe("digest --email", () => {
     const h = harness({ [SEND]: batch("queued") });
     expect(await h.exec(["digest", "tag", "rust", "--email", "me@team.dev", "--json"], sendEnv({ SMTPFAST_FROM: "digest@team.dev" }))).toBe(0);
     expect((h.sends()[0].body as { from: string }[])[0].from).toBe("digest@team.dev");
-    expect(JSON.parse(h.out())).toMatchObject({ from: "digest@team.dev", to: ["me@team.dev"], subject: "Latest rust posts on daily.dev (2026-10-08)", results: [{ to: "me@team.dev", sent: true, id: "em_1" }] });
+    expect(JSON.parse(h.out())).toMatchObject({ from: "digest@team.dev", to: ["me@team.dev"], subject: "Latest rust posts on daily.dev (2026-10-08)", results: [{ to: "me@team.dev", accepted: true, status: "queued", id: "em_1" }] });
   });
 
   it("escapes API text in the email it sends", async () => {
@@ -383,15 +383,46 @@ describe("digest --email", () => {
     expect(moved.calls.some((c) => c.url.host === "elsewhere.example")).toBe(false);
   });
 
-  it("does not quote fetch errors, which can contain the key", async () => {
+  // The digest request goes to daily.dev; `smtpfast` decides what the SMTPfast call does.
+  async function sendWith(smtpfast: () => Promise<Response>) {
+    let out = "";
     let err = "";
-    const failing = (async (input: URL | string) => {
-      if (String(input).startsWith("https://smtpfa.st")) throw new TypeError(`fetch failed: header Bearer ${KEY}`, { cause: { code: "ECONNRESET" } });
-      return new Response(JSON.stringify({ data: [post()] }), { status: 200 });
-    }) as unknown as typeof fetch;
-    const code = await run(emailArgs, { env: sendEnv(), fetch: failing, now: NOW, stdout: { write: () => true }, stderr: { write: (s: string) => (err += s) } });
-    expect(code).toBe(1);
-    expect(err).toBe("Could not reach SMTPfast (ECONNRESET).\n");
+    const fetchMock = (async (input: URL | string) => (String(input).startsWith("https://smtpfa.st") ? smtpfast() : new Response(JSON.stringify({ data: [post()] }), { status: 200 }))) as unknown as typeof fetch;
+    const code = await run(emailArgs, { env: sendEnv(), fetch: fetchMock, now: NOW, stdout: { write: (s: string) => (out += s) }, stderr: { write: (s: string) => (err += s) } });
+    return { code, out, err };
+  }
+  const UNSURE = "The emails may or may not have gone out. Check your SMTPfast dashboard before you send again.";
+
+  it("says no email was sent only when the connection failed before the request went out", async () => {
+    const r = await sendWith(async () => {
+      throw new TypeError(`fetch failed: header Bearer ${KEY}`, { cause: { code: "ENOTFOUND" } });
+    });
+    expect(r.code).toBe(1);
+    expect(r.err).toBe("Could not reach SMTPfast (ENOTFOUND). No email was sent.\n");
+  });
+
+  it("does not invite a retry after a reset, and does not quote fetch errors, which can contain the key", async () => {
+    const r = await sendWith(async () => {
+      throw new TypeError(`fetch failed: header Bearer ${KEY}`, { cause: { code: "ECONNRESET" } });
+    });
+    expect(r.code).toBe(1);
+    expect(r.err).toBe(`The connection to SMTPfast failed (ECONNRESET). ${UNSURE}\n`);
+    expect(r.err).not.toContain("Could not reach");
+  });
+
+  it("does not invite a retry when the answer is cut off while it is read", async () => {
+    const r = await sendWith(async () => {
+      const body = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"emails":['));
+          controller.error(Object.assign(new TypeError("terminated"), { cause: { code: "UND_ERR_SOCKET" } }));
+        },
+      });
+      return new Response(body, { status: 200 });
+    });
+    expect(r.code).toBe(1);
+    expect(r.err).toBe(`The answer from SMTPfast was cut off (UND_ERR_SOCKET). ${UNSURE}\n`);
+    expect(r.out).toBe("");
   });
 
   it("sends nothing when the digest is empty", async () => {

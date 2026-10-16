@@ -15,7 +15,8 @@ export interface EmailMessage {
   text: string;
 }
 
-export type EmailResult = { to: string; sent: true; id: string } | { to: string; sent: false; id?: string; error: string };
+/** `status` is SMTPfast's own, such as "queued"; null when it gave none. Accepted is not delivered yet. */
+export type EmailResult = { to: string; accepted: true; status: string | null; id: string } | { to: string; accepted: false; status: string | null; id?: string; error: string };
 
 export interface SendOptions {
   apiKey: string;
@@ -26,6 +27,15 @@ export interface SendOptions {
 }
 
 const UNSURE = "The emails may or may not have gone out. Check your SMTPfast dashboard before you send again.";
+
+// Errors where the connection failed before the request went out: DNS, connect and TLS.
+const NOT_SENT = /^(ENOTFOUND|EAI_AGAIN|ECONNREFUSED|EHOSTUNREACH|ENETUNREACH|EHOSTDOWN|UND_ERR_CONNECT_TIMEOUT|ERR_TLS_\w+|CERT_\w+|\w+_CERT\w*|UNABLE_TO_\w+)$/;
+
+/** Only an error code is shown, because a fetch error message can quote the request headers. */
+function errorCode(err: unknown): string | undefined {
+  const code = (err as { cause?: { code?: unknown } })?.cause?.code;
+  return typeof code === "string" && /^[A-Z0-9_]+$/.test(code) ? code : undefined;
+}
 
 /**
  * One email per recipient, so nobody sees the other addresses, in one POST to SMTPfast's batch
@@ -52,12 +62,19 @@ export async function sendEach({ apiKey, message, userAgent = "dailydev-cli", fe
       redirect: "manual",
       signal: AbortSignal.timeout(timeoutMs),
     });
-    text = await res.text();
   } catch (err) {
     if (err instanceof Error && err.name === "TimeoutError") throw new ApiError(`SMTPfast did not answer within ${timeoutMs / 1000}s. ${UNSURE}`, 0);
-    // A fetch error message can quote the request headers, so only an error code is shown.
-    const code = (err as { cause?: { code?: unknown } })?.cause?.code;
-    throw new ApiError(`Could not reach SMTPfast (${typeof code === "string" && /^[A-Z0-9_]+$/.test(code) ? code : "network error"}).`, 0);
+    const code = errorCode(err);
+    if (code && NOT_SENT.test(code)) throw new ApiError(`Could not reach SMTPfast (${code}). No email was sent.`, 0);
+    // Any other error, such as a reset, can come after SMTPfast has the request.
+    throw new ApiError(`The connection to SMTPfast failed (${code ?? "network error"}). ${UNSURE}`, 0);
+  }
+  try {
+    text = await res.text();
+  } catch (err) {
+    // SMTPfast has answered, so it may have accepted the batch.
+    const reason = err instanceof Error && err.name === "TimeoutError" ? `no full answer within ${timeoutMs / 1000}s` : (errorCode(err) ?? "network error");
+    throw new ApiError(`The answer from SMTPfast was cut off (${reason}). ${UNSURE}`, res.status);
   }
 
   if (res.status >= 300 && res.status < 400) {
@@ -79,11 +96,12 @@ export async function sendEach({ apiKey, message, userAgent = "dailydev-cli", fe
     return to.map((address, i): EmailResult => {
       const item = (list[i] ?? {}) as { id?: unknown; status?: unknown };
       const id = typeof item.id === "string" && item.id ? clean(redact(item.id)) : undefined;
-      const status = item.status === undefined ? "queued" : String(item.status);
-      if (id && (status === "queued" || status === "scheduled")) return { to: address, sent: true, id };
+      const status = typeof item.status === "string" ? clean(redact(item.status)) : null;
+      // The Resend shape has no status; an id there means the email was accepted.
+      if (id && (status === null || status === "queued" || status === "scheduled")) return { to: address, accepted: true, status, id };
       // SMTPfast records the email but does not send it when its To address is suppressed.
-      if (status === "failed") return { to: address, sent: false, id, error: "SMTPfast did not send it, because the address is suppressed after an earlier bounce, complaint or unsubscribe." };
-      return { to: address, sent: false, id, error: `SMTPfast answered with status "${clean(redact(status))}" and ${id ? `id ${id}` : "no id"}. It may or may not have gone out.` };
+      if (status === "failed") return { to: address, accepted: false, status, id, error: "SMTPfast did not send it, because the address is suppressed after an earlier bounce, complaint or unsubscribe." };
+      return { to: address, accepted: false, status, id, error: `SMTPfast answered with status "${status ?? "none"}" and ${id ? `id ${id}` : "no id"}. It may or may not have gone out.` };
     });
   }
 

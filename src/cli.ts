@@ -450,16 +450,17 @@ async function digest(ctx: Context) {
     userAgent: `dailydev-cli/${VERSION}`,
     fetch: ctx.io.fetch,
   });
-  const sent = results.filter((r) => r.sent).length;
+  const accepted = results.filter((r) => r.accepted).length;
   if (ctx.opts.json) {
     printJson(ctx, { from, to, results, ...json });
   } else {
     const width = Math.max(...results.map((r) => r.to.length));
-    const lines = results.map((r) => `  ${r.to.padEnd(width)}  ${r.sent ? `sent, id ${r.id}` : `not sent: ${r.error}`}`);
-    const count = sent === results.length ? plural(sent, "recipient") : `${sent} of ${plural(results.length, "recipient")}`;
-    print(ctx, [`Sent "${d.subject}" to ${count}, one email each:`, ...lines].join("\n"));
+    // Accepted means SMTPfast has the email; delivery comes later.
+    const lines = results.map((r) => `  ${r.to.padEnd(width)}  ${r.accepted ? `accepted (${r.status ?? "queued"}), id ${r.id}` : `not sent: ${r.error}`}`);
+    const count = accepted === results.length ? plural(accepted, "recipient") : `${accepted} of ${plural(results.length, "recipient")}`;
+    print(ctx, [`SMTPfast accepted "${d.subject}" for ${count}, one email each:`, ...lines].join("\n"));
   }
-  if (sent < results.length) throw new ApiError(`Not sent: ${results.length - sent} of ${plural(results.length, "email")}.`, 0);
+  if (accepted < results.length) throw new ApiError(`Not accepted: ${results.length - accepted} of ${plural(results.length, "email")}.`, 0);
 }
 
 function digestEmpty(plan: DigestPlan): string {
