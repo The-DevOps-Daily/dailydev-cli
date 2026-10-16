@@ -74,7 +74,9 @@ The search matches keywords, not sentences. `dailydev search another operation i
 
 `--limit` sets how many posts (default 10). With `--json`, the CLI prints the subject and the posts as the API sends them.
 
-`--email` sends the digest through [SMTPfast](https://smtpfa.st) with your own API key. Give it more than once, or comma separate the addresses. All recipients go in the To field of one email, so they see each other's addresses. The From address comes from `--from` or `SMTPFAST_FROM`, and it must be on a domain you verified in your SMTPfast account.
+`--email` sends the digest through [SMTPfast](https://smtpfa.st) with your own API key. Give it more than once, or comma separate the addresses (up to 100). Each recipient gets an email of their own, so nobody sees the other addresses; the CLI sends them in one SMTPfast batch call. The From address comes from `--from` or `SMTPFAST_FROM`, and it must be on a domain you verified in your SMTPfast account.
+
+The CLI prints the result for each recipient, sent or the reason it was not, and exits 1 if any email was not sent. SMTPfast accepts or refuses a batch as a whole, so when it refuses one, no email goes out.
 
 ```bash
 export SMTPFAST_API_KEY="sf_..."

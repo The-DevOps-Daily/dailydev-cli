@@ -2,7 +2,7 @@ import { parseArgs } from "node:util";
 import { ApiError, BASE_URL, TOKEN_URL, createClient, feedRequest, type Client, type Comment, type Feed, type Page, type Post } from "./api.ts";
 import { buildDigest, digestRequest, formatSchedule, planDigest, renderDigest, renderHtml, renderText, renderTextList, scheduleText, selectPosts, type DigestPlan } from "./digest.ts";
 import { createStyle, formatComments, formatPost, formatPostList, plural, shellQuote, stripControls, type Style } from "./format.ts";
-import { MISSING_KEY, sendEmail } from "./smtpfast.ts";
+import { MISSING_KEY, sendEach } from "./smtpfast.ts";
 import { VERSION } from "./version.ts";
 
 export interface Io {
@@ -435,22 +435,31 @@ async function digest(ctx: Context) {
   const { from, to, dryRun } = plan.email;
   if (dryRun) {
     if (ctx.opts.json) return printJson(ctx, { dryRun: true, from, to, ...json });
-    const head = ["Dry run: nothing was sent.", `From:    ${from}`, `To:      ${to.join(", ")}`, `Subject: ${d.subject}`].join("\n");
+    const each = to.length > 1 ? " (one email each)" : "";
+    const head = ["Dry run: nothing was sent.", `From:    ${from}`, `To:      ${to.join(", ")}${each}`, `Subject: ${d.subject}`].join("\n");
     return print(ctx, `${head}\n\n${posts.length ? renderTextList(d, now) : `${digestEmpty(plan)} A real run sends no email.`}`);
   }
 
   if (!posts.length) {
-    if (ctx.opts.json) return printJson(ctx, { id: null, from, to, ...json });
+    if (ctx.opts.json) return printJson(ctx, { from, to, results: [], ...json });
     return print(ctx, `${digestEmpty(plan)} No email was sent.`);
   }
-  const { id } = await sendEmail({
+  const results = await sendEach({
     apiKey,
     message: { from, to, subject: d.subject, html: renderHtml(d, now), text: renderText(d, now) },
     userAgent: `dailydev-cli/${VERSION}`,
     fetch: ctx.io.fetch,
   });
-  if (ctx.opts.json) return printJson(ctx, { id, from, to, ...json });
-  print(ctx, `Sent "${d.subject}" to ${to.join(", ")}. SMTPfast email id: ${id}`);
+  const sent = results.filter((r) => r.sent).length;
+  if (ctx.opts.json) {
+    printJson(ctx, { from, to, results, ...json });
+  } else {
+    const width = Math.max(...results.map((r) => r.to.length));
+    const lines = results.map((r) => `  ${r.to.padEnd(width)}  ${r.sent ? `sent, id ${r.id}` : `not sent: ${r.error}`}`);
+    const count = sent === results.length ? plural(sent, "recipient") : `${sent} of ${plural(results.length, "recipient")}`;
+    print(ctx, [`Sent "${d.subject}" to ${count}, one email each:`, ...lines].join("\n"));
+  }
+  if (sent < results.length) throw new ApiError(`Not sent: ${results.length - sent} of ${plural(results.length, "email")}.`, 0);
 }
 
 function digestEmpty(plan: DigestPlan): string {

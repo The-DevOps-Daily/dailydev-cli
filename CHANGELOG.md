@@ -3,7 +3,7 @@
 ## [0.2.0] - 2026-10-16
 
 - `digest` builds a digest of popular, discussed, tag, search, For You or bookmarked posts, and prints it as Markdown, text or HTML.
-- `digest --email` sends the digest through SMTPfast with your own `SMTPFAST_API_KEY`. `--dry-run` shows the email and sends nothing.
+- `digest --email` sends the digest through SMTPfast with your own `SMTPFAST_API_KEY`, one email per recipient in one batch call, and prints the result for each recipient. `--dry-run` shows the email and sends nothing.
 - `digest --schedule` prints a weekly cron line and a GitHub Actions workflow for the same command.
 
 ## [0.1.2] - 2026-10-08

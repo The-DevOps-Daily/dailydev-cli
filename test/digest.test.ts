@@ -36,7 +36,11 @@ interface Call {
 type Reply = { status?: number; body?: unknown; headers?: Record<string, string> };
 
 const KEY = "sf_test_key_123";
-const SEND = "POST smtpfa.st/api/v1/emails";
+const SEND = "POST smtpfa.st/api/v1/emails/batch";
+/** SMTPfast's batch answer: one id and status per email, in request order. */
+const batch = (...statuses: string[]) => ({
+  body: { batch_id: "b_1", count: statuses.length, emails: statuses.map((status, i) => ({ id: `em_${i + 1}`, status })), data: statuses.map((_, i) => ({ id: `em_${i + 1}` })) },
+});
 
 function harness(responses: Record<string, Reply> = {}) {
   const calls: Call[] = [];
@@ -233,7 +237,7 @@ describe("digest --email", () => {
       [
         "Dry run: nothing was sent.",
         "From:    Digest <digest@team.dev>",
-        "To:      a@team.dev, b@team.dev, c@team.dev",
+        "To:      a@team.dev, b@team.dev, c@team.dev (one email each)",
         "Subject: Popular on daily.dev (2026-10-08)",
         "",
         "1. A Missing Binary Turned a Kubernetes Liveness Probe Into a Restart Loop",
@@ -248,52 +252,105 @@ describe("digest --email", () => {
     expect(JSON.parse(noKey.out())).toMatchObject({ dryRun: true, from: "Digest <digest@team.dev>", to: ["a@team.dev", "b@team.dev", "c@team.dev"], subject: "Popular on daily.dev (2026-10-08)" });
   });
 
-  it("sends the digest to SMTPfast with the key, no redirects and the documented body", async () => {
-    const h = harness({ [SEND]: { body: { id: "em_123" } } });
-    expect(await h.exec([...emailArgs, "--email", "A@team.dev"], sendEnv())).toBe(0);
+  it("sends one recipient one email in one batch call, with the key and no redirects", async () => {
+    const h = harness({ [SEND]: batch("queued") });
+    expect(await h.exec(["digest", "--email", "a@team.dev", "--from", "Digest <digest@team.dev>"], sendEnv())).toBe(0);
     const [send] = h.sends();
     expect(h.sends()).toHaveLength(1);
-    expect(send.url.href).toBe("https://smtpfa.st/api/v1/emails");
+    expect(send.url.href).toBe("https://smtpfa.st/api/v1/emails/batch");
     expect(send.method).toBe("POST");
     expect(send.redirect).toBe("manual");
     expect(send.headers.Authorization).toBe(`Bearer ${KEY}`);
     expect(send.headers["Content-Type"]).toBe("application/json");
     expect(send.headers["User-Agent"]).toBe(`dailydev-cli/${VERSION}`);
 
-    const body = send.body as Record<string, string>;
-    expect(Object.keys(body).sort()).toEqual(["from", "html", "subject", "text", "to"]);
-    expect(body.from).toBe("Digest <digest@team.dev>");
-    expect(body.to).toEqual(["a@team.dev", "b@team.dev", "c@team.dev"]);
-    expect(body.subject).toBe("Popular on daily.dev (2026-10-08)");
-    expect(body.html).toContain("A Missing Binary Turned a Kubernetes Liveness Probe Into a Restart Loop");
-    expect(body.text).toMatch(/^Popular on daily\.dev \(2026-10-08\)\n\n1\. A Missing Binary/);
+    const items = send.body as Record<string, unknown>[];
+    expect(items).toHaveLength(1);
+    expect(Object.keys(items[0]).sort()).toEqual(["from", "html", "subject", "text", "to"]);
+    expect(items[0].from).toBe("Digest <digest@team.dev>");
+    expect(items[0].to).toEqual(["a@team.dev"]);
+    expect(items[0].subject).toBe("Popular on daily.dev (2026-10-08)");
+    expect(items[0].html).toContain("A Missing Binary Turned a Kubernetes Liveness Probe Into a Restart Loop");
+    expect(items[0].text).toMatch(/^Popular on daily\.dev \(2026-10-08\)\n\n1\. A Missing Binary/);
 
-    expect(h.out()).toBe('Sent "Popular on daily.dev (2026-10-08)" to a@team.dev, b@team.dev, c@team.dev. SMTPfast email id: em_123\n');
+    expect(h.out()).toBe('Sent "Popular on daily.dev (2026-10-08)" to 1 recipient, one email each:\n  a@team.dev  sent, id em_1\n');
+    expect(h.err()).toBe("");
     expect(h.out() + h.err()).not.toContain(KEY);
   });
 
-  it("takes the From address from SMTPFAST_FROM and prints the id with --json", async () => {
-    const h = harness({ [SEND]: { body: { id: "em_456" } } });
+  it("sends three recipients one email each, so nobody sees the other addresses", async () => {
+    const h = harness({ [SEND]: batch("queued", "queued", "queued") });
+    expect(await h.exec([...emailArgs, "--email", "A@team.dev"], sendEnv())).toBe(0);
+    expect(h.sends()).toHaveLength(1);
+    const items = h.sends()[0].body as { to: string[]; subject: string; html: string }[];
+    expect(items.map((i) => i.to)).toEqual([["a@team.dev"], ["b@team.dev"], ["c@team.dev"]]);
+    expect(new Set(items.map((i) => i.subject)).size).toBe(1);
+    for (const item of items) expect(JSON.stringify(item).match(/@team\.dev/g)).toHaveLength(2);
+
+    expect(h.out()).toBe(
+      [
+        'Sent "Popular on daily.dev (2026-10-08)" to 3 recipients, one email each:',
+        "  a@team.dev  sent, id em_1",
+        "  b@team.dev  sent, id em_2",
+        "  c@team.dev  sent, id em_3",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("reports each recipient and exits 1 when one of three emails is not sent", async () => {
+    const h = harness({ [SEND]: batch("queued", "failed", "queued") });
+    expect(await h.exec(emailArgs, sendEnv())).toBe(1);
+    expect(h.out()).toBe(
+      [
+        'Sent "Popular on daily.dev (2026-10-08)" to 2 of 3 recipients, one email each:',
+        "  a@team.dev  sent, id em_1",
+        "  b@team.dev  not sent: SMTPfast did not send it, because the address is suppressed after an earlier bounce, complaint or unsubscribe.",
+        "  c@team.dev  sent, id em_3",
+        "",
+      ].join("\n"),
+    );
+    expect(h.err()).toBe("Not sent: 1 of 3 emails.\n");
+
+    const j = harness({ [SEND]: batch("queued", "failed", "queued") });
+    expect(await j.exec([...emailArgs, "--json"], sendEnv())).toBe(1);
+    expect(JSON.parse(j.out()).results).toEqual([
+      { to: "a@team.dev", sent: true, id: "em_1" },
+      { to: "b@team.dev", sent: false, id: "em_2", error: expect.stringContaining("suppressed") },
+      { to: "c@team.dev", sent: true, id: "em_3" },
+    ]);
+  });
+
+  it("does not claim a send when SMTPfast returns fewer results than emails", async () => {
+    const h = harness({ [SEND]: batch("queued") });
+    expect(await h.exec(emailArgs, sendEnv())).toBe(1);
+    expect(h.err()).toContain("without a result for each email");
+    expect(h.err()).toContain("may or may not have gone out");
+    expect(h.out()).toBe("");
+  });
+
+  it("takes the From address from SMTPFAST_FROM and prints the results with --json", async () => {
+    const h = harness({ [SEND]: batch("queued") });
     expect(await h.exec(["digest", "tag", "rust", "--email", "me@team.dev", "--json"], sendEnv({ SMTPFAST_FROM: "digest@team.dev" }))).toBe(0);
-    expect((h.sends()[0].body as { from: string }).from).toBe("digest@team.dev");
-    expect(JSON.parse(h.out())).toMatchObject({ id: "em_456", from: "digest@team.dev", to: ["me@team.dev"], subject: "Latest rust posts on daily.dev (2026-10-08)" });
+    expect((h.sends()[0].body as { from: string }[])[0].from).toBe("digest@team.dev");
+    expect(JSON.parse(h.out())).toMatchObject({ from: "digest@team.dev", to: ["me@team.dev"], subject: "Latest rust posts on daily.dev (2026-10-08)", results: [{ to: "me@team.dev", sent: true, id: "em_1" }] });
   });
 
   it("escapes API text in the email it sends", async () => {
     const evil = post({ title: "<script>x</script>", source: { id: "s", name: "<b>S</b>" } });
-    const h = harness({ "GET api.daily.dev/public/v1/feeds/popular": { body: { data: [evil] } }, [SEND]: { body: { id: "em_1" } } });
+    const h = harness({ "GET api.daily.dev/public/v1/feeds/popular": { body: { data: [evil] } }, [SEND]: batch("queued", "queued", "queued") });
     await h.exec(emailArgs, sendEnv());
-    const { html } = h.sends()[0].body as { html: string };
+    const [{ html }] = h.sends()[0].body as { html: string }[];
     expect(html).not.toContain("<script>");
     expect(html).not.toContain("<b>S</b>");
     expect(html).toContain("&lt;script&gt;x&lt;/script&gt;");
   });
 
   it("shows SMTPfast's error when it refuses the From domain", async () => {
-    const h = harness({ [SEND]: { status: 403, body: { error: "Domain team.dev is not verified. Add and verify it in the dashboard first." } } });
+    const h = harness({ [SEND]: { status: 403, body: { error: "Item 0: domain team.dev is not verified" } } });
     expect(await h.exec(emailArgs, sendEnv())).toBe(1);
     expect(h.err()).toBe(
-      "SMTPfast refused the email (403): Domain team.dev is not verified. Add and verify it in the dashboard first. The From address must be on a domain you verified in your SMTPfast account.\n",
+      "SMTPfast refused the emails (403): Item 0: domain team.dev is not verified. The From address must be on a domain you verified in your SMTPfast account. No email was sent.\n",
     );
     expect(h.out()).toBe("");
     expect(h.err()).not.toContain(KEY);
@@ -302,11 +359,11 @@ describe("digest --email", () => {
   it("explains a rejected key, a server error and a redirect without following it", async () => {
     const bad = harness({ [SEND]: { status: 401, body: { error: "Invalid API key" } } });
     expect(await bad.exec(emailArgs, sendEnv())).toBe(1);
-    expect(bad.err()).toBe("SMTPfast refused the email (401): Invalid API key Check SMTPFAST_API_KEY.\n");
+    expect(bad.err()).toBe("SMTPfast refused the emails (401): Invalid API key. Check SMTPFAST_API_KEY. No email was sent.\n");
 
     const echo = harness({ [SEND]: { status: 401, body: { error: `Invalid key ${KEY}` } } });
     expect(await echo.exec(emailArgs, sendEnv())).toBe(1);
-    expect(echo.err()).toBe("SMTPfast refused the email (401): Invalid key [key] Check SMTPFAST_API_KEY.\n");
+    expect(echo.err()).toBe("SMTPfast refused the emails (401): Invalid key [key]. Check SMTPFAST_API_KEY. No email was sent.\n");
 
     // Redacted before the message is shortened, so no part of the key is left at the cut.
     const long = harness({ [SEND]: { status: 400, body: { error: "x".repeat(286) + KEY } } });
@@ -375,7 +432,7 @@ describe("digest --email", () => {
       ["digest", "--email", "not-an-address", "--from", "digest@team.dev"],
       ["digest", "--email", "me@team.dev"],
       ["digest", "--email", "me@team.dev", "--from", "Digest <nope>"],
-      ["digest", "--email", Array.from({ length: 51 }, (_, i) => `u${i}@team.dev`).join(","), "--from", "digest@team.dev"],
+      ["digest", "--email", Array.from({ length: 101 }, (_, i) => `u${i}@team.dev`).join(","), "--from", "digest@team.dev"],
       ["digest", "--email", "me@team.dev", "--from", "digest@team.dev", "--format", "html"],
       ["digest", "--from", "digest@team.dev"],
       ["digest", "--dry-run"],
@@ -480,7 +537,7 @@ describe("digest --schedule", () => {
     const { cron } = JSON.parse(h.out());
     expect(cron).toBe("0 8 * * 1 dailydev digest -- search rust --email=extra@team.dev --from=d@team.dev");
 
-    const replay = harness({ [SEND]: { body: { id: "em_1" } } });
+    const replay = harness({ [SEND]: batch("queued") });
     const argv = cron.replace("0 8 * * 1 dailydev ", "").split(" ");
     expect(await replay.exec(argv, sendEnv())).toBe(0);
     expect(replay.sends()).toHaveLength(0);

@@ -1,5 +1,6 @@
 import { feedRequest, type Feed, type Post, type Query } from "./api.ts";
 import { plural, postMeta, postTitle, shellQuote, wrap } from "./format.ts";
+import { MAX_BATCH } from "./smtpfast.ts";
 import { VERSION } from "./version.ts";
 
 export type DigestFormat = "markdown" | "text" | "html";
@@ -19,7 +20,6 @@ export interface DigestPlan {
 
 export const SOURCES = "popular, discussed, tag <tag>, search <words>, feed or bookmarks";
 const PACKAGE = "@devopsdaily/dailydev-cli";
-const MAX_RECIPIENTS = 50;
 const SUMMARY_LENGTH = 200;
 
 // CR and LF would start a new mail header; no other control character belongs in one either.
@@ -142,7 +142,8 @@ function readDigest(opts: Opts, args: string[], env: Record<string, string | und
     if (!to.some((a) => a.toLowerCase() === address.toLowerCase())) to.push(address);
   }
   if (!to.length) return fail("--email needs an address, for example: --email you@example.com");
-  if (to.length > MAX_RECIPIENTS) return fail(`SMTPfast takes up to ${MAX_RECIPIENTS} recipients for one email.`);
+  // Each recipient gets an email of their own, and SMTPfast takes up to MAX_BATCH in one call.
+  if (to.length > MAX_BATCH) return fail(`--email takes up to ${MAX_BATCH} addresses, the most SMTPfast sends in one batch.`);
 
   const fromName = opts.from !== undefined ? "--from" : "SMTPFAST_FROM";
   const from = (str(opts.from) ?? env.SMTPFAST_FROM ?? "").trim();
