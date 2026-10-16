@@ -413,7 +413,7 @@ async function digest(ctx: Context) {
   const now = ctx.io.now ?? Date.now();
 
   if (ctx.opts.schedule) {
-    const schedule = scheduleText(ctx.argv, plan);
+    const schedule = scheduleText(plan);
     return ctx.opts.json ? printJson(ctx, schedule) : print(ctx, formatSchedule(schedule, plan));
   }
 

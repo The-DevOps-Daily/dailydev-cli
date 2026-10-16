@@ -5,6 +5,8 @@ import { VERSION } from "./version.ts";
 export type DigestFormat = "markdown" | "text" | "html";
 
 export interface DigestPlan {
+  /** The source as given, such as ["search", "terraform", "state"]. */
+  source: string[];
   feed: Feed;
   /** The heading and the start of the email subject. */
   label: string;
@@ -21,7 +23,8 @@ const MAX_RECIPIENTS = 50;
 const SUMMARY_LENGTH = 200;
 
 // CR and LF would start a new mail header; no other control character belongs in one either.
-const HEADER_UNSAFE = /[\u0000-\u001f\u007f-\u009f]/;
+// U+2028 and U+2029 are line breaks to some YAML parsers, which matters for --schedule.
+const HEADER_UNSAFE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
 const ADDRESS = /^[^\s@<>",;]+@[^\s@<>",;]+\.[^\s@<>",;]+$/;
 
 type Opts = Record<string, unknown>;
@@ -30,21 +33,25 @@ const str = (value: unknown) => (typeof value === "string" ? value : undefined);
 
 /** Reads the source, options and addresses of a digest, or says what is wrong with them. */
 export function planDigest(opts: Opts, args: string[], env: Record<string, string | undefined>): { plan: DigestPlan } | { error: string } {
+  const res = readDigest(opts, args, env);
+  // GitHub reads ${{ ... }} as an expression even inside a quoted shell argument.
+  if ("plan" in res && opts.schedule && scheduledArgs(res.plan).some((a) => a.includes("${{"))) {
+    return { error: "--schedule cannot write ${{ into a GitHub Actions workflow, because GitHub reads it as an expression." };
+  }
+  return res;
+}
+
+function readDigest(opts: Opts, args: string[], env: Record<string, string | undefined>): { plan: DigestPlan } | { error: string } {
   const fail = (error: string) => ({ error });
   const [source = "popular", ...rest] = args;
 
-  // Checked on the raw values, before any trimming: --schedule prints the command as it was typed.
+  // Checked on the raw values, before any trimming.
   for (const [name, value] of Object.entries(opts)) {
     const values = Array.isArray(value) ? value : [value];
     if (values.some((v) => typeof v === "string" && HEADER_UNSAFE.test(v))) return fail(`--${name} cannot contain line breaks or other control characters.`);
   }
   if (args.some((a) => HEADER_UNSAFE.test(a))) return fail("Tags and search words cannot contain line breaks or other control characters, because they go into the email subject.");
   if (env.SMTPFAST_FROM && HEADER_UNSAFE.test(env.SMTPFAST_FROM)) return fail("SMTPFAST_FROM cannot contain line breaks or other control characters.");
-  if (opts.schedule) {
-    const typed = [...args, ...Object.values(opts).flat(), opts.email && opts.from === undefined ? env.SMTPFAST_FROM : undefined];
-    // GitHub reads ${{ ... }} as an expression even inside a quoted shell argument.
-    if (typed.some((v) => typeof v === "string" && v.includes("${{"))) return fail("--schedule cannot write ${{ into a GitHub Actions workflow, because GitHub reads it as an expression.");
-  }
 
   if (opts.tags !== undefined && opts.tag !== undefined) return fail("Give --tags or --tag, not both.");
   const tagsOpt = str(opts.tags) ?? str(opts.tag);
@@ -113,14 +120,15 @@ export function planDigest(opts: Opts, args: string[], env: Record<string, strin
 
   const format = (str(opts.format) ?? "markdown") as DigestFormat;
   const limit = opts.limit === undefined ? 10 : Number(opts.limit);
-  const plan: DigestPlan = { feed, label, limit, days, format };
+  const plan: DigestPlan = { source: [source, ...rest], feed, label, limit, days, format };
 
   const emails = Array.isArray(opts.email) ? (opts.email as string[]) : typeof opts.email === "string" ? [opts.email] : undefined;
   if (!emails) {
     for (const name of ["from", "dry-run"]) {
       if (opts[name] !== undefined) return fail(`--${name} is only used with --email.`);
     }
-    if (opts.format !== undefined && opts.json) return fail("Give --format or --json, not both.");
+    // With --schedule, --json is for the schedule and --format for the scheduled command.
+    if (opts.format !== undefined && opts.json && !opts.schedule) return fail("Give --format or --json, not both.");
     return { plan };
   }
 
@@ -297,16 +305,23 @@ export function renderDigest(d: Digest, format: DigestFormat, now?: number): str
   return renderMarkdown(d, now);
 }
 
-/** The same command without --schedule, --dry-run and --json (which is for the schedule itself), with the From address written out. */
-export function scheduledArgs(argv: string[], plan: DigestPlan): string[] {
-  const args = argv.filter((a) => a !== "--schedule" && a !== "--dry-run" && a !== "--json");
-  const hasFrom = args.some((a) => a === "--from" || a.startsWith("--from="));
-  if (plan.email && !hasFrom) args.push("--from", plan.email.from);
-  return args;
+/**
+ * The command to schedule, built from the checked values only and never from the raw command
+ * line, which can repeat an option. It leaves out --dry-run, and writes out the From address.
+ */
+export function scheduledArgs(plan: DigestPlan): string[] {
+  const out = ["digest", ...plan.source];
+  if (plan.feed.kind === "popular" && plan.feed.tags) out.push("--tags", plan.feed.tags);
+  if (plan.feed.kind === "discussed" && plan.feed.tag) out.push("--tags", plan.feed.tag);
+  if (plan.days !== undefined && plan.days !== 7) out.push("--days", String(plan.days));
+  if (plan.limit !== 10) out.push("--limit", String(plan.limit));
+  if (plan.format !== "markdown") out.push("--format", plan.format);
+  if (plan.email) out.push("--email", plan.email.to.join(","), "--from", plan.email.from);
+  return out;
 }
 
-export function scheduleText(argv: string[], plan: DigestPlan): { cron: string; workflow: string } {
-  const command = scheduledArgs(argv, plan).map(shellQuote).join(" ");
+export function scheduleText(plan: DigestPlan): { cron: string; workflow: string } {
+  const command = scheduledArgs(plan).map(shellQuote).join(" ");
   const secrets = plan.email ? ["DAILY_DEV_TOKEN", "SMTPFAST_API_KEY"] : ["DAILY_DEV_TOKEN"];
   // cron reads % as a line break, so it is escaped.
   const cron = `0 8 * * 1 dailydev ${command.replace(/%/g, "\\%")}`;
