@@ -64,12 +64,12 @@ export async function sendEmail({ apiKey, message, userAgent = "dailydev-cli", f
 
   if (res.ok) {
     const id = typeof json === "object" && json !== null ? (json as { id?: unknown }).id : undefined;
-    if (typeof id === "string" && id) return { id: redact(clean(id)) };
+    if (typeof id === "string" && id) return { id: clean(redact(id)) };
     throw new ApiError(`SMTPfast answered ${res.status} without an email id. ${UNSURE}`, res.status);
   }
 
   const raw = typeof json === "object" && json !== null ? (json as { error?: unknown }).error : undefined;
-  const detail = typeof raw === "string" ? redact(clean(raw)) : "";
+  const detail = typeof raw === "string" ? clean(redact(raw)) : "";
   const what = res.status >= 500 ? `SMTPfast answered ${res.status}` : `SMTPfast refused the email (${res.status})`;
   const parts = [detail ? `${what}: ${detail}` : `${what}.`];
   if (res.status === 401) parts.push("Check SMTPFAST_API_KEY.");

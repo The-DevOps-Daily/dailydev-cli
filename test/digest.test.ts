@@ -308,6 +308,11 @@ describe("digest --email", () => {
     expect(await echo.exec(emailArgs, sendEnv())).toBe(1);
     expect(echo.err()).toBe("SMTPfast refused the email (401): Invalid key [key] Check SMTPFAST_API_KEY.\n");
 
+    // Redacted before the message is shortened, so no part of the key is left at the cut.
+    const long = harness({ [SEND]: { status: 400, body: { error: "x".repeat(286) + KEY } } });
+    expect(await long.exec(emailArgs, sendEnv())).toBe(1);
+    expect(long.err()).not.toContain(KEY.slice(0, 6));
+
     const down = harness({ [SEND]: { status: 502, body: { error: "Bad gateway\x1b[2J" } } });
     expect(await down.exec(emailArgs, sendEnv())).toBe(1);
     expect(down.err()).toContain("SMTPfast answered 502: Bad gateway");
@@ -358,6 +363,9 @@ describe("digest --email", () => {
     expect(await h.exec(["digest", "--email", "me@team.dev\u202e", "--from", "digest@team.dev"], sendEnv())).toBe(2);
     expect(await h.exec(["digest", "--email", "me@team.dev", "--from", "Digest \u2066 <digest@team.dev>"], sendEnv())).toBe(2);
     expect(await h.exec(["digest", "search", "a\u202eb", "--email", "me@team.dev", "--from", "digest@team.dev"], sendEnv())).toBe(2);
+    for (const mark of ["\u061c", "\u200e", "\u200f"]) {
+      expect(await h.exec(["digest", "--email", `me${mark}@team.dev`, "--from", "digest@team.dev"], sendEnv())).toBe(2);
+    }
     expect(h.calls).toHaveLength(0);
   });
 
@@ -477,6 +485,17 @@ describe("digest --schedule", () => {
     expect(await replay.exec(argv, sendEnv())).toBe(0);
     expect(replay.sends()).toHaveLength(0);
     expect(replay.calls[0].url.searchParams.get("q")).toBe("rust --email=extra@team.dev --from=d@team.dev");
+  });
+
+  it("joins a value that starts with - to its option, so the replay reads it", async () => {
+    const h = harness();
+    expect(await h.exec(["digest", "--email=-me@team.dev", "--from=digest@team.dev", "--schedule", "--json"], {})).toBe(0);
+    const { cron } = JSON.parse(h.out());
+    expect(cron).toBe("0 8 * * 1 dailydev digest popular --email=-me@team.dev --from digest@team.dev");
+
+    const replay = harness();
+    expect(await replay.exec([...cron.replace("0 8 * * 1 dailydev ", "").split(" "), "--dry-run"], sendEnv())).toBe(0);
+    expect(replay.out()).toContain("To:      -me@team.dev");
   });
 
   it("refuses ${{ }}, which GitHub would evaluate inside the workflow", async () => {

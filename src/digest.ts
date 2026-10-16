@@ -25,7 +25,7 @@ const SUMMARY_LENGTH = 200;
 // CR and LF would start a new mail header; no other control character belongs in one either.
 // Bidi controls reorder what the reader sees, and U+2028 and U+2029 are line breaks to some
 // YAML parsers, which matters for --schedule.
-const HEADER_UNSAFE = /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069\u2028\u2029]/;
+const HEADER_UNSAFE = /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029]/;
 const ADDRESS = /^[^\s@<>",;]+@[^\s@<>",;]+\.[^\s@<>",;]+$/;
 
 type Opts = Record<string, unknown>;
@@ -312,12 +312,17 @@ export function renderDigest(d: Digest, format: DigestFormat, now?: number): str
  */
 export function scheduledArgs(plan: DigestPlan): string[] {
   const out: string[] = [];
-  if (plan.feed.kind === "popular" && plan.feed.tags) out.push("--tags", plan.feed.tags);
-  if (plan.feed.kind === "discussed" && plan.feed.tag) out.push("--tags", plan.feed.tag);
-  if (plan.days !== undefined && plan.days !== 7) out.push("--days", String(plan.days));
-  if (plan.limit !== 10) out.push("--limit", String(plan.limit));
-  if (plan.format !== "markdown") out.push("--format", plan.format);
-  if (plan.email) out.push("--email", plan.email.to.join(","), "--from", plan.email.from);
+  // A value that starts with "-" would read as an option, so it is joined to its name.
+  const option = (name: string, value: string) => out.push(...(value.startsWith("-") ? [`--${name}=${value}`] : [`--${name}`, value]));
+  if (plan.feed.kind === "popular" && plan.feed.tags) option("tags", plan.feed.tags);
+  if (plan.feed.kind === "discussed" && plan.feed.tag) option("tags", plan.feed.tag);
+  if (plan.days !== undefined && plan.days !== 7) option("days", String(plan.days));
+  if (plan.limit !== 10) option("limit", String(plan.limit));
+  if (plan.format !== "markdown") option("format", plan.format);
+  if (plan.email) {
+    option("email", plan.email.to.join(","));
+    option("from", plan.email.from);
+  }
   // A search word such as --email=x must stay a word, so it goes after "--".
   return plan.source.some((a) => a.startsWith("-")) ? ["digest", ...out, "--", ...plan.source] : ["digest", ...plan.source, ...out];
 }
